@@ -1,0 +1,50 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    @apply bg-gray-50 text-gray-900;
+  }
+}
+
+@layer components {
+  .btn-primary {
+    @apply bg-brand-600 hover:bg-brand-700 text-white font-medium py-2 px-4 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+  .btn-secondary {
+    @apply bg-white hover:bg-gray-50 text-gray-700 font-medium py-2 px-4 rounded-lg border border-gray-300 transition-colors disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+  .card {
+    @apply bg-white rounded-xl border border-gray-200 shadow-sm;
+  }
+  .input {
+    @apply border border-gray-300 rounded-lg px-3 py-2 w-full focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent;
+  }
+  .badge-high {
+    @apply bg-red-100 text-red-700 text-xs font-medium px-2 py-0.5 rounded-full;
+  }
+  .badge-medium {
+    @apply bg-yellow-100 text-yellow-700 text-xs font-medium px-2 py-0.5 rounded-full;
+  }
+  .badge-low {
+    @apply bg-green-100 text-green-700 text-xs font-medium px-2 py-0.5 rounded-full;
+  }
+}
+
+/* Markdown styles */
+.markdown-body h1 { @apply text-2xl font-bold mt-6 mb-3 text-gray-900; }
+.markdown-body h2 { @apply text-xl font-semibold mt-5 mb-2 text-gray-800 border-b border-gray-200 pb-1; }
+.markdown-body h3 { @apply text-lg font-semibold mt-4 mb-2 text-gray-800; }
+.markdown-body h4 { @apply text-base font-semibold mt-3 mb-1 text-gray-700; }
+.markdown-body p { @apply mb-3 text-gray-700 leading-relaxed; }
+.markdown-body ul { @apply list-disc list-inside mb-3 space-y-1; }
+.markdown-body ol { @apply list-decimal list-inside mb-3 space-y-1; }
+.markdown-body li { @apply text-gray-700; }
+.markdown-body blockquote { @apply border-l-4 border-brand-400 pl-4 py-1 my-3 bg-brand-50 text-gray-600 italic rounded-r; }
+.markdown-body table { @apply w-full border-collapse mb-4; }
+.markdown-body th { @apply bg-gray-100 border border-gray-300 px-3 py-2 text-left text-sm font-semibold; }
+.markdown-body td { @apply border border-gray-300 px-3 py-2 text-sm; }
+.markdown-body hr { @apply border-gray-200 my-6; }
+.markdown-body strong { @apply font-semibold text-gray-900; }
+.markdown-body code { @apply bg-gray-100 px-1 py-0.5 rounded text-sm font-mono; }
