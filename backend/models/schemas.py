@@ -77,6 +77,7 @@ class Session(BaseModel):
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: datetime = Field(default_factory=datetime.utcnow)
     research_brief: str = ""
+    transcript_source_url: Optional[str] = None
     transcripts: dict[str, str] = Field(default_factory=dict)
     participants: list[Participant] = Field(default_factory=list)
     screener_questions: list[str] = Field(default_factory=list)
@@ -98,6 +99,7 @@ class Session(BaseModel):
 
 class CreateSessionRequest(BaseModel):
     research_brief: str
+    transcript_source_url: Optional[str] = None
 
 
 class SetScreenerRequest(BaseModel):

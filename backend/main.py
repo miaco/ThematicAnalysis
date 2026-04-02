@@ -3,12 +3,17 @@ Thematic Analysis Agent System — FastAPI Backend
 """
 
 import asyncio
+import io
 import json
+import re
 import sys
 import os
 from datetime import datetime
 from typing import AsyncGenerator
+from urllib.parse import urlparse
 
+import httpx
+import pdfplumber
 from fastapi import FastAPI, HTTPException, BackgroundTasks, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse, Response
@@ -47,7 +52,10 @@ app.add_middleware(
 @app.post("/api/sessions", response_model=Session)
 async def create_session(req: CreateSessionRequest):
     """Create a new analysis session with a research brief."""
-    session = Session(research_brief=req.research_brief)
+    session = Session(
+        research_brief=req.research_brief,
+        transcript_source_url=req.transcript_source_url,
+    )
     save_session(session)
     return session
 
@@ -81,25 +89,121 @@ async def remove_session(session_id: str):
 # Data Upload
 # ---------------------------------------------------------------------------
 
+MAX_FILE_SIZE = 10 * 1024 * 1024  # 10 MB per file
+ALLOWED_EXTENSIONS = {".txt", ".pdf"}
+
+
+def _extract_text(filename: str, content_bytes: bytes) -> str:
+    """Extract text from an uploaded file based on its extension."""
+    ext = os.path.splitext(filename)[1].lower()
+    if ext == ".pdf":
+        with pdfplumber.open(io.BytesIO(content_bytes)) as pdf:
+            pages = [page.extract_text() or "" for page in pdf.pages]
+        text = "\n\n".join(pages).strip()
+        if not text:
+            raise ValueError(f"No extractable text found in {filename}")
+        return text
+    # Default: treat as plain text
+    try:
+        return content_bytes.decode("utf-8")
+    except UnicodeDecodeError:
+        return content_bytes.decode("latin-1", errors="replace")
+
+
 @app.post("/api/sessions/{session_id}/transcripts")
 async def upload_transcripts(session_id: str, files: list[UploadFile] = File(...)):
-    """Upload transcript files (multipart). Accepts .txt files."""
+    """Upload transcript files (multipart). Accepts .txt and .pdf files."""
     session = load_session(session_id)
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
     if session.state not in (PipelineState.IDLE, PipelineState.PROCESSING_TRANSCRIPTS):
         raise HTTPException(status_code=400, detail="Cannot upload transcripts in current state")
 
+    errors = []
+    added = []
     for upload in files:
+        ext = os.path.splitext(upload.filename)[1].lower()
+        if ext not in ALLOWED_EXTENSIONS:
+            errors.append(f"{upload.filename}: unsupported file type '{ext}'. Use .txt or .pdf.")
+            continue
+
         content_bytes = await upload.read()
+        if len(content_bytes) > MAX_FILE_SIZE:
+            errors.append(f"{upload.filename}: exceeds 10 MB size limit.")
+            continue
+        if len(content_bytes) == 0:
+            errors.append(f"{upload.filename}: file is empty.")
+            continue
+
         try:
-            content = content_bytes.decode("utf-8")
-        except UnicodeDecodeError:
-            content = content_bytes.decode("latin-1", errors="replace")
+            content = _extract_text(upload.filename, content_bytes)
+        except Exception as exc:
+            errors.append(f"{upload.filename}: {exc}")
+            continue
+
         session.transcripts[upload.filename] = content
+        added.append(upload.filename)
+
+    if not added and errors:
+        raise HTTPException(status_code=400, detail="No files could be processed. " + " | ".join(errors))
 
     save_session(session)
-    return {"message": f"Uploaded {len(files)} transcript(s)", "files": list(session.transcripts.keys())}
+    result: dict = {"message": f"Uploaded {len(added)} transcript(s)", "files": list(session.transcripts.keys())}
+    if errors:
+        result["warnings"] = errors
+    return result
+
+
+@app.post("/api/sessions/{session_id}/transcripts/fetch")
+async def fetch_transcript_from_url(session_id: str, payload: dict):
+    """Fetch a transcript from a public URL and add it to the session."""
+    session = load_session(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+    if session.state not in (PipelineState.IDLE, PipelineState.PROCESSING_TRANSCRIPTS):
+        raise HTTPException(status_code=400, detail="Cannot add transcripts in current state")
+
+    url = (payload.get("url") or "").strip()
+    if not url:
+        raise HTTPException(status_code=400, detail="URL is required")
+
+    parsed = urlparse(url)
+    if parsed.scheme not in ("http", "https"):
+        raise HTTPException(status_code=400, detail="URL must use http or https")
+
+    try:
+        async with httpx.AsyncClient(follow_redirects=True, timeout=30.0) as client:
+            resp = await client.get(url)
+            resp.raise_for_status()
+    except httpx.HTTPStatusError as exc:
+        raise HTTPException(status_code=400, detail=f"Remote server returned {exc.response.status_code}")
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"Failed to fetch URL: {exc}")
+
+    content_bytes = resp.content
+    if len(content_bytes) > MAX_FILE_SIZE:
+        raise HTTPException(status_code=400, detail="Fetched file exceeds 10 MB size limit")
+    if len(content_bytes) == 0:
+        raise HTTPException(status_code=400, detail="Fetched file is empty")
+
+    # Derive a filename from the URL path
+    path_tail = parsed.path.rstrip("/").split("/")[-1] or "transcript"
+    filename = re.sub(r'[^\w.\-]', '_', path_tail)
+    if not os.path.splitext(filename)[1]:
+        content_type = resp.headers.get("content-type", "")
+        if "pdf" in content_type:
+            filename += ".pdf"
+        else:
+            filename += ".txt"
+
+    try:
+        content = _extract_text(filename, content_bytes)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"Could not extract text: {exc}")
+
+    session.transcripts[filename] = content
+    save_session(session)
+    return {"message": f"Fetched and added '{filename}'", "files": list(session.transcripts.keys())}
 
 
 @app.post("/api/sessions/{session_id}/screener")
@@ -132,6 +236,12 @@ async def run_session_pipeline(session_id: str, background_tasks: BackgroundTask
 
     if session.state == PipelineState.COMPLETE:
         raise HTTPException(status_code=400, detail="Pipeline is already complete")
+
+    # Allow retrying from an error state — reset to the last human gate or idle
+    if session.state == PipelineState.ERROR:
+        session.state = PipelineState.IDLE
+        session.error = None
+        save_session(session)
 
     if session.state == PipelineState.IDLE and not session.transcripts:
         raise HTTPException(status_code=400, detail="No transcripts uploaded. Please upload transcripts first.")

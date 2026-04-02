@@ -7,16 +7,19 @@ interface TranscriptUploadProps {
 
 export default function TranscriptUpload({ onSessionCreated }: TranscriptUploadProps) {
   const [brief, setBrief] = useState('');
+  const [transcriptSourceUrl, setTranscriptSourceUrl] = useState('');
   const [screenerText, setScreenerText] = useState('');
   const [files, setFiles] = useState<File[]>([]);
   const [dragOver, setDragOver] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [fetchingUrl, setFetchingUrl] = useState(false);
   const [error, setError] = useState('');
+  const [warnings, setWarnings] = useState<string[]>([]);
 
   const handleFiles = useCallback((newFiles: FileList | null) => {
     if (!newFiles) return;
     const txtFiles = Array.from(newFiles).filter(f =>
-      f.name.endsWith('.txt') || f.name.endsWith('.pdf') || f.type === 'text/plain'
+      f.name.endsWith('.txt') || f.name.endsWith('.pdf') || f.type === 'text/plain' || f.type === 'application/pdf'
     );
     setFiles(prev => {
       const existing = new Set(prev.map(f => f.name));
@@ -34,11 +37,27 @@ export default function TranscriptUpload({ onSessionCreated }: TranscriptUploadP
   const handleStart = async () => {
     if (!brief.trim()) { setError('Please provide a research brief.'); return; }
     if (files.length === 0) { setError('Please upload at least one transcript.'); return; }
+
+    const trimmedUrl = transcriptSourceUrl.trim();
+    if (trimmedUrl) {
+      try {
+        const parsed = new URL(trimmedUrl);
+        if (!['http:', 'https:'].includes(parsed.protocol)) {
+          setError('Transcript source link must start with http:// or https://.');
+          return;
+        }
+      } catch {
+        setError('Please enter a valid transcript source link.');
+        return;
+      }
+    }
+
     setError('');
+    setWarnings([]);
     setLoading(true);
 
     try {
-      const session = await api.createSession(brief);
+      const session = await api.createSession(brief, trimmedUrl);
 
       // Set screener questions if provided
       const questions = screenerText.split('\n').map(q => q.trim()).filter(Boolean);
@@ -48,6 +67,15 @@ export default function TranscriptUpload({ onSessionCreated }: TranscriptUploadP
 
       // Upload transcripts
       await api.uploadTranscripts(session.id, files);
+
+      // Fetch from URL if provided and it looks like a direct file link
+      if (trimmedUrl) {
+        try {
+          await api.fetchTranscriptFromUrl(session.id, trimmedUrl);
+        } catch {
+          // Non-fatal — the URL may be a folder link, not a direct file
+        }
+      }
 
       // Start pipeline
       await api.runPipeline(session.id);
@@ -77,6 +105,22 @@ export default function TranscriptUpload({ onSessionCreated }: TranscriptUploadP
           placeholder="Describe your research question, objectives, and context. E.g. 'This study explores how remote workers experience work-life balance challenges and what coping strategies they employ...'"
           value={brief}
           onChange={e => setBrief(e.target.value)}
+        />
+      </div>
+
+      <div className="card p-5 space-y-3">
+        <div>
+          <label className="block text-sm font-semibold text-gray-700">Transcript Source Link</label>
+          <p className="text-xs text-gray-500 mt-0.5">
+            Optional. Link to a publicly accessible transcript file or folder (Google Drive, SharePoint, Dropbox). Direct file links (.txt, .pdf) will be fetched automatically when you start the analysis.
+          </p>
+        </div>
+        <input
+          className="input"
+          type="url"
+          placeholder="https://example.com/folder/your-transcripts"
+          value={transcriptSourceUrl}
+          onChange={e => setTranscriptSourceUrl(e.target.value)}
         />
       </div>
 
@@ -117,7 +161,7 @@ export default function TranscriptUpload({ onSessionCreated }: TranscriptUploadP
               <span className="text-brand-600 font-medium">Click to upload</span>
               <span className="text-gray-500"> or drag and drop</span>
             </div>
-            <p className="text-xs text-gray-400">.txt files supported</p>
+            <p className="text-xs text-gray-400">.txt and .pdf files supported (max 10 MB each)</p>
           </div>
           <input
             id="file-input"
@@ -155,6 +199,13 @@ export default function TranscriptUpload({ onSessionCreated }: TranscriptUploadP
       {error && (
         <div className="bg-red-50 border border-red-200 text-red-700 rounded-lg px-4 py-3 text-sm">
           {error}
+        </div>
+      )}
+
+      {warnings.length > 0 && (
+        <div className="bg-yellow-50 border border-yellow-200 text-yellow-700 rounded-lg px-4 py-3 text-sm space-y-1">
+          <p className="font-medium">Some files had issues:</p>
+          {warnings.map((w, i) => <p key={i}>• {w}</p>)}
         </div>
       )}
 

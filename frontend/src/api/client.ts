@@ -1,4 +1,4 @@
-const BASE_URL = 'http://localhost:8000';
+const BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
 
 export interface Participant {
   id: string;
@@ -57,6 +57,7 @@ export interface Session {
   created_at: string;
   updated_at: string;
   research_brief: string;
+  transcript_source_url: string | null;
   transcripts: Record<string, string>;
   participants: Participant[];
   screener_questions: string[];
@@ -103,11 +104,14 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
 
 export const api = {
   // Sessions
-  createSession: (brief: string) =>
+  createSession: (brief: string, transcriptSourceUrl?: string) =>
     request<Session>('/api/sessions', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ research_brief: brief }),
+      body: JSON.stringify({
+        research_brief: brief,
+        transcript_source_url: transcriptSourceUrl || undefined,
+      }),
     }),
 
   getSessions: () => request<Session[]>('/api/sessions'),
@@ -133,6 +137,16 @@ export const api = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ screener_questions: questions }),
     }),
+
+  fetchTranscriptFromUrl: (sessionId: string, url: string) =>
+    request<{ message: string; files: string[] }>(
+      `/api/sessions/${sessionId}/transcripts/fetch`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url }),
+      }
+    ),
 
   // Pipeline control
   runPipeline: (sessionId: string) =>
