@@ -1,13 +1,39 @@
 import React, { useState } from 'react';
-import { POV, api } from '../api/client';
+import { POV, Session, EvaluationScores, api } from '../api/client';
 
 interface Props {
   sessionId: string;
   povs: POV[];
+  themes?: Session['themes'];
   onSelect: () => void;
 }
 
-export default function POVSelector({ sessionId, povs, onSelect }: Props) {
+function ThemeScoreSummary({ themes }: { themes?: Session['themes'] }) {
+  if (!themes || themes.length === 0) return null;
+  const scored = themes.filter(t => t.scores);
+  if (scored.length === 0) return null;
+  const avg = scored.reduce((sum, t) => {
+    const s = t.scores!;
+    return sum + (s.coverage + s.actionability + s.distinctiveness + s.relevance) / 4;
+  }, 0) / scored.length;
+  const color = avg >= 4.0 ? 'bg-green-50 border-green-200 text-green-700' : avg >= 3.0 ? 'bg-yellow-50 border-yellow-200 text-yellow-700' : 'bg-red-50 border-red-200 text-red-700';
+  return (
+    <div className={`rounded-lg border px-4 py-3 ${color}`}>
+      <div className="flex items-center justify-between">
+        <span className="text-sm font-semibold">Theme Quality Score</span>
+        <span className="text-lg font-bold">{avg.toFixed(1)}/5.0</span>
+      </div>
+      <div className="flex flex-wrap gap-3 mt-2 text-xs">
+        {(['coverage', 'actionability', 'distinctiveness', 'relevance'] as const).map(c => {
+          const cAvg = scored.reduce((s, t) => s + (t.scores as EvaluationScores)[c], 0) / scored.length;
+          return <span key={c}>{c.charAt(0).toUpperCase() + c.slice(1)}: <span className="font-semibold">{cAvg.toFixed(1)}</span></span>;
+        })}
+      </div>
+    </div>
+  );
+}
+
+export default function POVSelector({ sessionId, povs, themes, onSelect }: Props) {
   const [selected, setSelected] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -34,6 +60,8 @@ export default function POVSelector({ sessionId, povs, onSelect }: Props) {
           Choose the Point of View that best aligns with your research goals. This will guide the recommendations and final report.
         </p>
       </div>
+
+      <ThemeScoreSummary themes={themes} />
 
       <div className="grid gap-4">
         {povs.map((pov, i) => {

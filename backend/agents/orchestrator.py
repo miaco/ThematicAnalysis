@@ -11,6 +11,7 @@ from models.schemas import Session, PipelineState
 from storage.session_store import save_session, load_session
 from agents.transcript_agent import analyze_transcripts
 from agents.coding_agent import code_quotes
+from agents.evaluation_agent import evaluate_codes, evaluate_themes
 from agents.theme_agent import generate_themes
 from agents.pov_agent import propose_povs, generate_recommendations
 from agents.report_agent import write_report
@@ -71,7 +72,10 @@ async def run_pipeline(session_id: str):
             await _emit(session_id, "processing_transcripts", f"Extracted {len(session.quotes)} quotes from {len(session.transcripts)} transcripts")
 
             session = await asyncio.to_thread(_run_coding, session)
-            await _emit(session_id, "coding", f"Generated {len(session.codes)} codes. Ready for human review.")
+            await _emit(session_id, "coding", f"Generated {len(session.codes)} codes.")
+
+            session = await asyncio.to_thread(_run_code_evaluation, session)
+            await _emit(session_id, "evaluation", f"Evaluated code quality. Ready for human review.")
 
             session.state = PipelineState.AWAITING_CODE_REVIEW
             save_session(session)
@@ -86,6 +90,9 @@ async def run_pipeline(session_id: str):
 
             session = await asyncio.to_thread(_run_theme_generation, session)
             await _emit(session_id, "processing_themes", f"Generated {len(session.themes)} themes.")
+
+            session = await asyncio.to_thread(_run_theme_evaluation, session)
+            await _emit(session_id, "evaluation", f"Evaluated theme quality.")
 
             session = await asyncio.to_thread(_run_pov_generation, session)
             await _emit(session_id, "pov_generation", f"Generated {len(session.povs)} Points of View. Ready for selection.")
@@ -160,6 +167,16 @@ def _run_pov_generation(session: Session) -> Session:
 def _run_recommendation_generation(session: Session) -> Session:
     """Run recommendation generation synchronously."""
     return generate_recommendations(session)
+
+
+def _run_code_evaluation(session: Session) -> Session:
+    """Run code quality evaluation synchronously."""
+    return evaluate_codes(session)
+
+
+def _run_theme_evaluation(session: Session) -> Session:
+    """Run theme quality evaluation synchronously."""
+    return evaluate_themes(session)
 
 
 def _run_report_writing(session: Session) -> Session:

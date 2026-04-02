@@ -15,6 +15,13 @@ export interface Quote {
   codes: string[];
 }
 
+export interface EvaluationScores {
+  coverage: number;
+  actionability: number;
+  distinctiveness: number;
+  relevance: number;
+}
+
 export interface Code {
   id: string;
   label: string;
@@ -22,6 +29,7 @@ export interface Code {
   quote_ids: string[];
   group: string | null;
   screener_groups: Record<string, string>;
+  scores: EvaluationScores | null;
 }
 
 export interface Theme {
@@ -33,6 +41,7 @@ export interface Theme {
   literature_support: string[];
   interpretation: string;
   contradictory_quotes: string[];
+  scores: EvaluationScores | null;
 }
 
 export interface POV {

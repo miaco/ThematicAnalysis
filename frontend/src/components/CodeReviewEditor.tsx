@@ -1,5 +1,38 @@
 import React, { useState } from 'react';
-import { Code, Quote, api } from '../api/client';
+import { Code, Quote, EvaluationScores, api } from '../api/client';
+
+function ScoreBadge({ scores }: { scores: EvaluationScores | null }) {
+  if (!scores) return null;
+  const avg = ((scores.coverage + scores.actionability + scores.distinctiveness + scores.relevance) / 4);
+  const color = avg >= 4.0 ? 'bg-green-100 text-green-700' : avg >= 3.0 ? 'bg-yellow-100 text-yellow-700' : 'bg-red-100 text-red-700';
+  return (
+    <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${color}`} title={`Coverage: ${scores.coverage} | Actionability: ${scores.actionability} | Distinctiveness: ${scores.distinctiveness} | Relevance: ${scores.relevance}`}>
+      {avg.toFixed(1)}/5
+    </span>
+  );
+}
+
+function ScoreBreakdown({ scores }: { scores: EvaluationScores | null }) {
+  if (!scores) return null;
+  const criteria = [
+    { label: 'Coverage', value: scores.coverage },
+    { label: 'Actionability', value: scores.actionability },
+    { label: 'Distinctiveness', value: scores.distinctiveness },
+    { label: 'Relevance', value: scores.relevance },
+  ];
+  return (
+    <div className="flex flex-wrap gap-2 mt-1.5">
+      {criteria.map(c => {
+        const color = c.value >= 4.0 ? 'text-green-600' : c.value >= 3.0 ? 'text-yellow-600' : 'text-red-600';
+        return (
+          <span key={c.label} className="text-xs text-gray-500">
+            {c.label}: <span className={`font-medium ${color}`}>{c.value.toFixed(1)}</span>
+          </span>
+        );
+      })}
+    </div>
+  );
+}
 
 interface Props {
   sessionId: string;
@@ -146,8 +179,10 @@ export default function CodeReviewEditor({ sessionId, codes: initialCodes, quote
                             <span className="text-xs text-gray-400 bg-gray-100 px-2 py-0.5 rounded-full">
                               {codeQuotes.length} quote{codeQuotes.length !== 1 ? 's' : ''}
                             </span>
+                            <ScoreBadge scores={code.scores} />
                           </div>
                           <p className="text-xs text-gray-500 mt-0.5">{code.description}</p>
+                          <ScoreBreakdown scores={code.scores} />
                         </div>
                         <div className="flex items-center gap-1 flex-shrink-0">
                           <button

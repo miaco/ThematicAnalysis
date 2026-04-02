@@ -214,6 +214,7 @@ export default function App() {
           <POVSelector
             sessionId={s.id}
             povs={s.povs}
+            themes={s.themes}
             onSelect={handleStateChange}
           />
         )}

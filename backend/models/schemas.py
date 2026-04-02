@@ -35,6 +35,18 @@ class Quote(BaseModel):
     codes: list[str] = Field(default_factory=list)
 
 
+class EvaluationScores(BaseModel):
+    """Quality scores on TAMA's four evaluation criteria (1.0–5.0 scale)."""
+    coverage: float = 0.0
+    actionability: float = 0.0
+    distinctiveness: float = 0.0
+    relevance: float = 0.0
+
+    @property
+    def average(self) -> float:
+        return round((self.coverage + self.actionability + self.distinctiveness + self.relevance) / 4, 2)
+
+
 class Code(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     label: str
@@ -42,6 +54,7 @@ class Code(BaseModel):
     quote_ids: list[str] = Field(default_factory=list)
     group: Optional[str] = None
     screener_groups: dict = Field(default_factory=dict)
+    scores: Optional[EvaluationScores] = None
 
 
 class Theme(BaseModel):
@@ -53,6 +66,7 @@ class Theme(BaseModel):
     literature_support: list[str] = Field(default_factory=list)
     interpretation: str = ""
     contradictory_quotes: list[str] = Field(default_factory=list)
+    scores: Optional[EvaluationScores] = None
 
 
 class POV(BaseModel):
