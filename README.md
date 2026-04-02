@@ -8,8 +8,10 @@ Thematic Analysis is a local full-stack application for running an AI-assisted q
 - Uploads transcript files (.txt and .pdf) into a session
 - Fetches transcripts from public URLs (Google Drive, Dropbox, SharePoint, etc.)
 - Extracts quotes and generates open codes
+- Evaluates codes on quality metrics (coverage, actionability, distinctiveness, relevance)
 - Pauses for human code review before continuing
 - Generates themes and candidate points of view
+- Evaluates themes on the same quality metrics
 - Pauses for POV selection
 - Generates recommendations tied to the selected POV
 - Pauses for recommendation selection
@@ -46,7 +48,7 @@ The application is intentionally human-in-the-loop. It does not run straight thr
 ```text
 .
 ├── backend/
-│   ├── agents/           # Pipeline stages: transcript, coding, themes, POV, report
+│   ├── agents/           # Pipeline stages: transcript, coding, evaluation, themes, POV, report
 │   ├── models/           # Pydantic schemas and pipeline state models
 │   ├── storage/          # Session persistence
 │   ├── main.py           # FastAPI app and API routes
@@ -128,8 +130,8 @@ npm run dev
 5. Optionally add screener or demographic questions, one per line.
 6. Upload transcript files (.txt or .pdf, max 10 MB each).
 7. Start the pipeline.
-8. Review and edit generated codes when the workflow pauses.
-9. Select the preferred analytical POV.
+8. Review and edit generated codes when the workflow pauses. Each code displays quality scores on four criteria: coverage, actionability, distinctiveness, and relevance (1–5 scale).
+9. Select the preferred analytical POV. A theme quality summary card shows aggregate evaluation scores.
 10. Select which recommendations should appear in the final report.
 11. Download the completed markdown report.
 
@@ -169,6 +171,19 @@ Core endpoints include:
 - Uploaded files are validated for type (.txt, .pdf), size (10 MB max), and content before processing.
 - PDF files are parsed with pdfplumber; text is extracted page-by-page.
 - If the pipeline errors out, re-running it will automatically retry from the beginning.
+
+## Evaluation Metrics
+
+Inspired by the [TAMA framework](https://github.com/Charlie-Yi-SJ/TAMA), the pipeline includes an evaluation agent that scores codes and themes on four criteria:
+
+| Criterion | What it measures |
+|---|---|
+| **Coverage** | How well the item captures important patterns in the data |
+| **Actionability** | Whether it encapsulates a single, clear concept |
+| **Distinctiveness** | How clearly it is differentiated from other items in the set |
+| **Relevance** | How accurately it reflects participant data and the research brief |
+
+Each item receives a score from 1.0 to 5.0 on each criterion. Scores are displayed in the UI during code review (per-code badges and breakdowns) and POV selection (aggregate theme quality card). Unlike TAMA's automated refinement loop, these scores inform the human reviewer rather than driving autonomous iteration — the researcher makes the final call.
 
 ## Development Commands
 
