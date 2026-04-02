@@ -5,7 +5,8 @@ Thematic Analysis is a local full-stack application for running an AI-assisted q
 ## What It Does
 
 - Creates analysis sessions from a research brief
-- Uploads transcript files into a session
+- Uploads transcript files (.txt and .pdf) into a session
+- Fetches transcripts from public URLs (Google Drive, Dropbox, SharePoint, etc.)
 - Extracts quotes and generates open codes
 - Pauses for human code review before continuing
 - Generates themes and candidate points of view
@@ -35,7 +36,9 @@ The application is intentionally human-in-the-loop. It does not run straight thr
 - Backend: FastAPI, Pydantic, Uvicorn
 - Frontend: React, TypeScript, Vite, Tailwind CSS
 - AI integration: Anthropic API
-- Persistence: JSON session files stored on disk
+- Persistence: SQLite (WAL mode)
+- PDF parsing: pdfplumber
+- HTTP client: httpx (for URL transcript fetching)
 - Realtime progress: Server-Sent Events (SSE)
 
 ## Project Structure
@@ -121,19 +124,22 @@ npm run dev
 1. Open the frontend in your browser.
 2. Create a new analysis session.
 3. Enter a research brief describing the study objective and context.
-4. Optionally add screener or demographic questions, one per line.
-5. Upload transcript files.
-6. Start the pipeline.
-7. Review and edit generated codes when the workflow pauses.
-8. Select the preferred analytical POV.
-9. Select which recommendations should appear in the final report.
-10. Download the completed markdown report.
+4. Optionally add a transcript source link (a public URL pointing to transcript files).
+5. Optionally add screener or demographic questions, one per line.
+6. Upload transcript files (.txt or .pdf, max 10 MB each).
+7. Start the pipeline.
+8. Review and edit generated codes when the workflow pauses.
+9. Select the preferred analytical POV.
+10. Select which recommendations should appear in the final report.
+11. Download the completed markdown report.
+
+If the pipeline encounters an error, you can retry from the session view — the app will reset and re-run from the last checkpoint.
 
 ## Data Storage
 
-Session data is stored locally as JSON files under `backend/sessions/`. Each session includes pipeline state, uploaded transcripts, extracted quotes, codes, themes, POVs, recommendations, validation results, and the generated report.
+Session data is stored in a local SQLite database at `backend/thematic_analysis.db` using WAL mode for safe concurrent reads. Each session record includes pipeline state, uploaded transcripts, extracted quotes, codes, themes, POVs, recommendations, validation results, and the generated report.
 
-These files are local working data and are not intended for production-grade storage.
+The database is local working data and is excluded from version control via `.gitignore`.
 
 ## API Overview
 
@@ -143,7 +149,8 @@ Core endpoints include:
 - `GET /api/sessions` to list sessions
 - `GET /api/sessions/{session_id}` to fetch a session
 - `DELETE /api/sessions/{session_id}` to delete a session
-- `POST /api/sessions/{session_id}/transcripts` to upload transcripts
+- `POST /api/sessions/{session_id}/transcripts` to upload transcripts (.txt, .pdf)
+- `POST /api/sessions/{session_id}/transcripts/fetch` to fetch a transcript from a public URL
 - `POST /api/sessions/{session_id}/screener` to set screener questions
 - `POST /api/sessions/{session_id}/run` to start or continue the pipeline
 - `GET /api/sessions/{session_id}/progress` for SSE progress streaming
@@ -156,10 +163,12 @@ Core endpoints include:
 
 ## Notes
 
-- The frontend is configured to talk to `http://localhost:8000`.
+- The frontend API base URL defaults to `http://localhost:8000` and can be overridden by setting the `VITE_API_URL` environment variable before building or starting the frontend.
 - CORS is enabled for local frontend development on port `5173`.
 - Progress updates are streamed from the backend over SSE during active pipeline stages.
-- The current implementation is optimized for local use and experimentation rather than deployment hardening.
+- Uploaded files are validated for type (.txt, .pdf), size (10 MB max), and content before processing.
+- PDF files are parsed with pdfplumber; text is extracted page-by-page.
+- If the pipeline errors out, re-running it will automatically retry from the beginning.
 
 ## Development Commands
 
