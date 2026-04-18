@@ -60,12 +60,19 @@ export interface Recommendation {
   selected: boolean;
 }
 
+export interface ResearchBrief {
+  research_question: string;
+  participants: string;
+  method: string;
+}
+
 export interface Session {
   id: string;
   state: PipelineState;
   created_at: string;
   updated_at: string;
   research_brief: string;
+  research_brief_structured: ResearchBrief;
   transcript_source_url: string | null;
   transcripts: Record<string, string>;
   participants: Participant[];
@@ -113,12 +120,14 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
 
 export const api = {
   // Sessions
-  createSession: (brief: string, transcriptSourceUrl?: string) =>
+  createSession: (researchQuestion: string, participants?: string, method?: string, transcriptSourceUrl?: string) =>
     request<Session>('/api/sessions', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        research_brief: brief,
+        research_question: researchQuestion,
+        participants: participants || '',
+        method: method || '',
         transcript_source_url: transcriptSourceUrl || undefined,
       }),
     }),

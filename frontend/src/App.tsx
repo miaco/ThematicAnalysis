@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { api, Session, PipelineState } from './api/client';
+import ResearchBriefForm from './components/ResearchBriefForm';
 import TranscriptUpload from './components/TranscriptUpload';
 import PipelineProgress from './components/PipelineProgress';
 import CodeReviewEditor from './components/CodeReviewEditor';
@@ -39,6 +40,8 @@ export default function App() {
   const [activeSession, setActiveSession] = useState<Session | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [showNewSession, setShowNewSession] = useState(false);
+  const [newSessionStep, setNewSessionStep] = useState<'brief' | 'upload'>('brief');
+  const [pendingSessionId, setPendingSessionId] = useState<string | null>(null);
   const [loadingSession, setLoadingSession] = useState(false);
 
   const refreshSessions = useCallback(async () => {
@@ -81,12 +84,26 @@ export default function App() {
     return () => clearInterval(interval);
   }, [activeSession?.state, refreshActiveSession]);
 
-  const handleSessionCreated = (sessionId: string) => {
-    setShowNewSession(false);
-    setActiveSessionId(sessionId);
-    refreshSessions();
-    // Allow a moment then load
-    setTimeout(() => refreshActiveSession(), 1000);
+  const handleBriefComplete = async (data: { researchQuestion: string; participants: string; method: string }) => {
+    try {
+      const session = await api.createSession(data.researchQuestion, data.participants, data.method);
+      setPendingSessionId(session.id);
+      setNewSessionStep('upload');
+      refreshSessions();
+    } catch (e) {
+      // Error handling is in the form component
+    }
+  };
+
+  const handlePipelineStarted = () => {
+    if (pendingSessionId) {
+      setShowNewSession(false);
+      setNewSessionStep('brief');
+      setActiveSessionId(pendingSessionId);
+      setPendingSessionId(null);
+      refreshSessions();
+      setTimeout(() => refreshActiveSession(), 1000);
+    }
   };
 
   const handleSelectSession = async (id: string) => {
@@ -120,7 +137,17 @@ export default function App() {
   // Render the main content based on session state
   const renderContent = () => {
     if (showNewSession) {
-      return <TranscriptUpload onSessionCreated={handleSessionCreated} />;
+      if (newSessionStep === 'brief') {
+        return <ResearchBriefForm onNext={handleBriefComplete} />;
+      }
+      if (newSessionStep === 'upload' && pendingSessionId) {
+        return (
+          <TranscriptUpload
+            sessionId={pendingSessionId}
+            onPipelineStarted={handlePipelineStarted}
+          />
+        );
+      }
     }
 
     if (!activeSession) {
@@ -135,7 +162,7 @@ export default function App() {
             <h2 className="text-xl font-bold text-gray-900">Thematic Analysis Agent</h2>
             <p className="text-gray-500 mt-1">Create a new analysis session or select one from the sidebar.</p>
           </div>
-          <button className="btn-primary" onClick={() => setShowNewSession(true)}>
+          <button className="btn-primary" onClick={() => { setShowNewSession(true); setNewSessionStep('brief'); }}>
             New Analysis
           </button>
         </div>
@@ -261,7 +288,7 @@ export default function App() {
           <div className="p-3">
             <button
               className="btn-primary w-full py-2 text-sm flex items-center justify-center gap-1.5"
-              onClick={() => { setShowNewSession(true); setActiveSessionId(null); }}
+              onClick={() => { setShowNewSession(true); setNewSessionStep('brief'); setActiveSessionId(null); }}
             >
               <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />

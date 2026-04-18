@@ -24,4 +24,4 @@ backend/sessions/
 
 # Local editor and logs
 .vscode/
-*.log
+*.log.vite/

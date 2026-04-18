@@ -12,6 +12,8 @@ from datetime import datetime
 import anthropic
 
 from models.schemas import Session, Theme
+from orchestration.pipeline_config import MODELS
+from skills.step4_grounding import check_grounding
 
 
 client = anthropic.Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY"))
@@ -121,7 +123,7 @@ IMPORTANT: Return ONLY valid JSON, no markdown code blocks."""
     _log(session, "Calling Claude for theme generation and analysis...")
 
     with client.messages.stream(
-        model="claude-opus-4-6",
+        model=MODELS["primary"],
         max_tokens=12000,
         thinking={"type": "adaptive"},
         messages=[{"role": "user", "content": prompt}],
@@ -196,57 +198,17 @@ IMPORTANT: Return ONLY valid JSON, no markdown code blocks."""
 
     if thin_themes:
         _log(session, f"Warning: These themes have fewer than 3 supporting quotes (thin description): {', '.join(thin_themes)}")
-        session.validation_results["thin_description_themes"] = thin_themes
+        session.validation_results.thin_description_themes = thin_themes
 
-    session.validation_results["thematic_map_notes"] = data.get("thematic_map_notes", "")
-    session.validation_results["data_saturation_assessment"] = data.get("data_saturation_assessment", "")
+    session.validation_results.thematic_map_notes = data.get("thematic_map_notes", "")
+    session.validation_results.data_saturation_assessment = data.get("data_saturation_assessment", "")
 
     # Run grounding check
-    grounding_issues = _run_grounding_check(session)
+    grounding_issues = check_grounding(session.themes, session.codes, session.quotes)
     if grounding_issues:
-        session.validation_results["grounding_issues"] = grounding_issues
+        session.validation_results.grounding_issues = grounding_issues
         for issue in grounding_issues:
             _log(session, f"Grounding issue: {issue}")
 
     _log(session, "Theme generation complete.")
     return session
-
-
-def _run_grounding_check(session: Session) -> list[str]:
-    """
-    Verify traceability: each theme should trace back to codes, which trace to quotes.
-    """
-    issues = []
-    code_map = {c.id: c for c in session.codes}
-    quote_ids = {q.id for q in session.quotes}
-
-    for theme in session.themes:
-        # Check that theme has at least 1 code
-        if not theme.code_ids:
-            issues.append(f"Theme '{theme.name}': No codes linked")
-            continue
-
-        # Check codes exist
-        missing_codes = []
-        for cid in theme.code_ids:
-            if cid not in code_map:
-                missing_codes.append(cid)
-
-        if missing_codes:
-            issues.append(f"Theme '{theme.name}': {len(missing_codes)} referenced codes not found in session codes")
-
-        # Check that codes link to actual quotes
-        total_quote_refs = 0
-        for cid in theme.code_ids:
-            code = code_map.get(cid)
-            if code:
-                valid_quote_refs = [qid for qid in code.quote_ids if qid in quote_ids]
-                total_quote_refs += len(valid_quote_refs)
-
-        if total_quote_refs < 3:
-            issues.append(
-                f"Theme '{theme.name}': Only {total_quote_refs} verifiable quote reference(s). "
-                "Recommend at least 3 for robust grounding."
-            )
-
-    return issues

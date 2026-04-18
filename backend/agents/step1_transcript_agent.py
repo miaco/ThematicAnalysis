@@ -11,6 +11,8 @@ from datetime import datetime
 import anthropic
 
 from models.schemas import Session, Quote, Participant
+from orchestration.pipeline_config import MODELS
+from skills.step1_quote_extraction import detect_language_and_word_count, verify_quote_accuracy
 
 
 client = anthropic.Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY"))
@@ -22,18 +24,6 @@ def _log(session: Session, message: str):
         "stage": "transcript_analysis",
         "message": message,
     })
-
-
-def _detect_language_and_word_count(text: str) -> dict:
-    """Basic preprocessing checks."""
-    words = text.split()
-    word_count = len(words)
-    # Simple heuristic: check for non-ASCII chars as a proxy for non-English
-    ascii_ratio = sum(1 for c in text if ord(c) < 128) / max(len(text), 1)
-    language_warning = None
-    if ascii_ratio < 0.7:
-        language_warning = "Text may contain non-English content (high non-ASCII ratio). Please verify language."
-    return {"word_count": word_count, "language_warning": language_warning}
 
 
 def analyze_transcripts(session: Session) -> Session:
@@ -50,12 +40,11 @@ def analyze_transcripts(session: Session) -> Session:
 
     all_quotes: list[Quote] = []
     participants_map: dict[str, Participant] = {}
-    validation_results = {}
 
     # Preprocessing checks
     preprocessing_warnings = []
     for filename, content in session.transcripts.items():
-        checks = _detect_language_and_word_count(content)
+        checks = detect_language_and_word_count(content)
         wc = checks["word_count"]
         if wc < 100:
             preprocessing_warnings.append(
@@ -65,7 +54,7 @@ def analyze_transcripts(session: Session) -> Session:
             preprocessing_warnings.append(f"{filename}: {checks['language_warning']}")
 
     if preprocessing_warnings:
-        validation_results["preprocessing_warnings"] = preprocessing_warnings
+        session.validation_results.preprocessing_warnings = preprocessing_warnings
         for w in preprocessing_warnings:
             _log(session, f"Warning: {w}")
 
@@ -122,7 +111,7 @@ IMPORTANT: Return ONLY valid JSON, no markdown code blocks, no explanation text.
     _log(session, "Calling Claude to extract quotes and participants from transcripts...")
 
     with client.messages.stream(
-        model="claude-opus-4-6",
+        model=MODELS["primary"],
         max_tokens=8000,
         thinking={"type": "adaptive"},
         messages=[{"role": "user", "content": prompt}],
@@ -180,11 +169,7 @@ IMPORTANT: Return ONLY valid JSON, no markdown code blocks, no explanation text.
 
         # Accuracy check: verify the quote exists in the source transcript
         source_content = session.transcripts.get(t_file, "")
-        # Normalize whitespace for comparison
-        normalized_quote = " ".join(quote_text.lower().split())
-        normalized_source = " ".join(source_content.lower().split())
-
-        accuracy_ok = normalized_quote[:50] in normalized_source if len(normalized_quote) >= 10 else True
+        accuracy_ok = verify_quote_accuracy(quote_text, source_content)
 
         if not accuracy_ok:
             accuracy_issues.append(f"Quote may be inaccurate: '{quote_text[:80]}...' not found verbatim in {t_file}")
@@ -202,7 +187,7 @@ IMPORTANT: Return ONLY valid JSON, no markdown code blocks, no explanation text.
         verified_quotes.append(quote)
 
     if accuracy_issues:
-        validation_results["accuracy_issues"] = accuracy_issues
+        session.validation_results.accuracy_issues = accuracy_issues
         _log(session, f"Found {len(accuracy_issues)} potential accuracy issues in quotes")
 
     session.quotes = verified_quotes
@@ -239,11 +224,9 @@ IMPORTANT: Return ONLY valid JSON, no markdown code blocks, no explanation text.
                         "Minimum 2 recommended for reliable analysis."
                     )
         if coverage_warnings:
-            validation_results["screener_coverage_warnings"] = coverage_warnings
+            session.validation_results.screener_coverage_warnings = coverage_warnings
             for w in coverage_warnings:
                 _log(session, f"Warning: {w}")
-
-    session.validation_results.update(validation_results)
 
     _log(session, f"Transcript analysis complete. {len(session.quotes)} quotes from {len(session.participants)} participants.")
     return session

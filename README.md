@@ -48,9 +48,26 @@ The application is intentionally human-in-the-loop. It does not run straight thr
 ```text
 .
 ├── backend/
-│   ├── agents/           # Pipeline stages: transcript, coding, evaluation, themes, POV, report
-│   ├── models/           # Pydantic schemas and pipeline state models
-│   ├── storage/          # Session persistence
+│   ├── orchestration/    # Pipeline controller, state machine, stage registry
+│   │   ├── orchestrator.py       # Runs the pipeline via declarative stage list
+│   │   ├── pipeline_config.py    # Model names, PIPELINE stage definitions
+│   │   └── state_machine.py      # Validated transitions, SSE progress queues
+│   ├── agents/           # One file per pipeline step
+│   │   ├── step1_transcript_agent.py
+│   │   ├── step2_coding_agent.py
+│   │   ├── step3_5_evaluation_agent.py
+│   │   ├── step4_theme_agent.py
+│   │   ├── step6_pov_agent.py
+│   │   ├── step7_recommendation_agent.py
+│   │   ├── step8_report_agent.py
+│   │   └── demo_data.py          # Mock data for DEMO_MODE testing
+│   ├── skills/           # Reusable validation & analysis functions
+│   │   ├── step1_quote_extraction.py   # Language detection, quote accuracy
+│   │   ├── step2_coding_consistency.py # Jaccard similarity consistency check
+│   │   ├── step3_5_scoring.py          # Score parsing, set averages (TAMA)
+│   │   └── step4_grounding.py          # Theme → code → quote traceability
+│   ├── models/           # Pydantic schemas, typed ValidationResults, pipeline states
+│   ├── storage/          # SQLite session persistence
 │   ├── main.py           # FastAPI app and API routes
 │   └── requirements.txt
 ├── frontend/

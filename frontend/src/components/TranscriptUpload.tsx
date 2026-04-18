@@ -2,24 +2,23 @@ import React, { useState, useCallback } from 'react';
 import { api } from '../api/client';
 
 interface TranscriptUploadProps {
-  onSessionCreated: (sessionId: string) => void;
+  sessionId: string;
+  onPipelineStarted: () => void;
 }
 
-export default function TranscriptUpload({ onSessionCreated }: TranscriptUploadProps) {
-  const [brief, setBrief] = useState('');
+export default function TranscriptUpload({ sessionId, onPipelineStarted }: TranscriptUploadProps) {
   const [transcriptSourceUrl, setTranscriptSourceUrl] = useState('');
   const [screenerText, setScreenerText] = useState('');
   const [files, setFiles] = useState<File[]>([]);
   const [dragOver, setDragOver] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [fetchingUrl, setFetchingUrl] = useState(false);
   const [error, setError] = useState('');
   const [warnings, setWarnings] = useState<string[]>([]);
 
   const handleFiles = useCallback((newFiles: FileList | null) => {
     if (!newFiles) return;
     const txtFiles = Array.from(newFiles).filter(f =>
-      f.name.endsWith('.txt') || f.name.endsWith('.pdf') || f.type === 'text/plain' || f.type === 'application/pdf'
+      f.name.endsWith('.txt') || f.name.endsWith('.pdf') || f.name.endsWith('.docx') || f.type === 'text/plain' || f.type === 'application/pdf' || f.type === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
     );
     setFiles(prev => {
       const existing = new Set(prev.map(f => f.name));
@@ -35,7 +34,6 @@ export default function TranscriptUpload({ onSessionCreated }: TranscriptUploadP
   }, [handleFiles]);
 
   const handleStart = async () => {
-    if (!brief.trim()) { setError('Please provide a research brief.'); return; }
     if (files.length === 0) { setError('Please upload at least one transcript.'); return; }
 
     const trimmedUrl = transcriptSourceUrl.trim();
@@ -57,30 +55,28 @@ export default function TranscriptUpload({ onSessionCreated }: TranscriptUploadP
     setLoading(true);
 
     try {
-      const session = await api.createSession(brief, trimmedUrl);
-
       // Set screener questions if provided
       const questions = screenerText.split('\n').map(q => q.trim()).filter(Boolean);
       if (questions.length > 0) {
-        await api.setScreener(session.id, questions);
+        await api.setScreener(sessionId, questions);
       }
 
       // Upload transcripts
-      await api.uploadTranscripts(session.id, files);
+      await api.uploadTranscripts(sessionId, files);
 
       // Fetch from URL if provided and it looks like a direct file link
       if (trimmedUrl) {
         try {
-          await api.fetchTranscriptFromUrl(session.id, trimmedUrl);
+          await api.fetchTranscriptFromUrl(sessionId, trimmedUrl);
         } catch {
           // Non-fatal — the URL may be a folder link, not a direct file
         }
       }
 
       // Start pipeline
-      await api.runPipeline(session.id);
+      await api.runPipeline(sessionId);
 
-      onSessionCreated(session.id);
+      onPipelineStarted();
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to start analysis');
     } finally {
@@ -91,28 +87,15 @@ export default function TranscriptUpload({ onSessionCreated }: TranscriptUploadP
   return (
     <div className="max-w-2xl mx-auto p-6 space-y-6">
       <div>
-        <h1 className="text-2xl font-bold text-gray-900 mb-1">New Thematic Analysis</h1>
-        <p className="text-gray-500 text-sm">Upload your interview transcripts and define your research scope to begin the AI-powered analysis pipeline.</p>
-      </div>
-
-      {/* Research Brief */}
-      <div className="card p-5 space-y-3">
-        <label className="block text-sm font-semibold text-gray-700">
-          Research Brief <span className="text-red-500">*</span>
-        </label>
-        <textarea
-          className="input resize-none h-32"
-          placeholder="Describe your research question, objectives, and context. E.g. 'This study explores how remote workers experience work-life balance challenges and what coping strategies they employ...'"
-          value={brief}
-          onChange={e => setBrief(e.target.value)}
-        />
+        <h1 className="text-2xl font-bold text-gray-900 mb-1">Upload Transcripts</h1>
+        <p className="text-gray-500 text-sm">Upload your interview transcripts and optionally configure screener questions for demographic segmentation.</p>
       </div>
 
       <div className="card p-5 space-y-3">
         <div>
           <label className="block text-sm font-semibold text-gray-700">Transcript Source Link</label>
           <p className="text-xs text-gray-500 mt-0.5">
-            Optional. Link to a publicly accessible transcript file or folder (Google Drive, SharePoint, Dropbox). Direct file links (.txt, .pdf) will be fetched automatically when you start the analysis.
+            Optional. Link to a publicly accessible transcript file or folder (Google Drive, SharePoint, Dropbox). Direct file links (.txt, .pdf, .docx) will be fetched automatically when you start the analysis.
           </p>
         </div>
         <input
@@ -161,13 +144,13 @@ export default function TranscriptUpload({ onSessionCreated }: TranscriptUploadP
               <span className="text-brand-600 font-medium">Click to upload</span>
               <span className="text-gray-500"> or drag and drop</span>
             </div>
-            <p className="text-xs text-gray-400">.txt and .pdf files supported (max 10 MB each)</p>
+            <p className="text-xs text-gray-400">.txt, .pdf, and .docx files supported (max 10 MB each)</p>
           </div>
           <input
             id="file-input"
             type="file"
             multiple
-            accept=".txt,.pdf"
+            accept=".txt,.pdf,.docx"
             className="hidden"
             onChange={e => handleFiles(e.target.files)}
           />

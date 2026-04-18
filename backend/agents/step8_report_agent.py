@@ -11,6 +11,7 @@ from datetime import datetime
 import anthropic
 
 from models.schemas import Session
+from orchestration.pipeline_config import MODELS
 
 
 client = anthropic.Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY"))
@@ -35,7 +36,7 @@ def write_report(session: Session) -> Session:
     if issues:
         for issue in issues:
             _log(session, f"Pre-write check: {issue}")
-        session.validation_results["pre_write_checks"] = issues
+        session.validation_results.pre_write_checks = issues
 
     # Research question alignment check
     alignment_ok = _check_research_alignment(session)
@@ -54,26 +55,26 @@ Write a complete, professional thematic analysis report in markdown format. The 
 # [Report Title Based on Research Brief]
 
 ## Executive Summary
-- 3-5 bullet points summarizing key findings
 - Overall research purpose and scope
+- Brief sentence on the participant demographics
+- Reference the methodology used where appropriate
+- Key research questions addressed
 - Most significant insights
+- 3-5 bullet points summarizing key findings
 
 ## Methodology
 ### Research Design
-- Brief description of the qualitative thematic analysis approach
-- Reference to Braun & Clarke (2006) thematic analysis framework where appropriate
+- Brief description of the methodology and protocol used in the study
+- Brief description of the qualitative thematic analysis approach used in the study
+- Reference to Braun & Clarke (2006 and 2019) thematic analysis framework where appropriate
 
 ### Participants
-- Demographics table showing participant profiles (based on screener data)
-- Total number of participants
+- Use the screener data to create a summary of the participant profiles. Focus on their role or occupation.
 - Recruitment approach (inferred from screener questions)
 
-### Data Collection
-- Description of data sources (transcripts)
+### Data Collection and Analytical Process
+- Summary of data sources (transcripts)
 - Number of transcripts analyzed
-- Data saturation notes
-
-### Analytical Process
 - Description of coding process
 - Number of codes generated, groups identified
 - Theme development process
@@ -83,8 +84,8 @@ For each theme, write a dedicated subsection:
 
 ### Theme 1: [Theme Name]
 - Description and explanation of the theme
-- Supporting evidence with at least 2 verbatim quotes (properly formatted as block quotes)
-- Participant attribution for quotes
+- Supporting evidence with at least 3 verbatim quotes (properly formatted as block quotes)
+- Participant attribution for quotes. Use "Participant [ID], [Role]" format
 - Quote count and participant representation
 
 [Repeat for each theme]
@@ -92,10 +93,13 @@ For each theme, write a dedicated subsection:
 ### Negative Cases and Contradictions
 - Discuss any contradictory evidence found
 - How contradictions were addressed in the analysis
+- Include participant quotes that contradict the theme to illustrate negative cases. 
+- Use "Participant [ID], [Role]" format for attribution.
 
 ## Discussion
 ### Interpretation and Meaning
 - Synthesis of themes and what they mean together
+- Include negative cases and contradictions in the interpretation
 - Connection to the selected analytical POV
 
 ### Literature Contextualization
@@ -107,16 +111,16 @@ For each theme, write a dedicated subsection:
 - Scope limitations
 
 ## Recommendations
-[List all selected recommendations, organized by priority]
+[List all selected recommendations, organized by impact to the business]
 
-### High Priority
-[High priority recommendations with rationale]
+### High Impact
+[High impact recommendations with rationale]
 
-### Medium Priority
-[Medium priority recommendations]
+### Medium Impact
+[Medium impact recommendations]
 
-### Low Priority
-[Lower priority, longer-term recommendations]
+### Low Impact
+[Lower impact, longer-term recommendations]
 
 ## Appendices
 
@@ -135,7 +139,7 @@ List all codes with descriptions and frequency counts.
 IMPORTANT STYLE GUIDELINES:
 - Use proper markdown formatting throughout
 - Format direct quotes as > blockquotes
-- Attribute quotes to participants (e.g., "Participant 3, Manager")
+- Attribute quotes to participants (e.g., "Participant [ID], Manager")
 - Be analytical and interpretive, not just descriptive
 - Maintain academic tone while being accessible to a professional audience
 - Total length should be comprehensive — at least 3,000 words"""
@@ -143,7 +147,7 @@ IMPORTANT STYLE GUIDELINES:
     _log(session, "Calling Claude to write the full report...")
 
     with client.messages.stream(
-        model="claude-opus-4-6",
+        model=MODELS["primary"],
         max_tokens=16000,
         thinking={"type": "adaptive"},
         messages=[{"role": "user", "content": prompt}],
@@ -218,7 +222,7 @@ def _check_research_alignment(session: Session) -> bool:
             misaligned.append(theme.name)
 
     if misaligned:
-        session.validation_results["research_alignment_warnings"] = (
+        session.validation_results.research_alignment_warnings = (
             f"These themes may not clearly connect to the research brief: {', '.join(misaligned)}"
         )
         return False
@@ -271,7 +275,7 @@ def _build_report_context(session: Session) -> str:
             context += f"  [{r.priority.upper()}] {r.text} (Theme: {r.supporting_theme})\n"
 
     # Validation results / additional context
-    if session.validation_results.get("implementation_notes"):
-        context += f"\nIMPLEMENTATION NOTES: {session.validation_results['implementation_notes']}\n"
+    if session.validation_results.implementation_notes:
+        context += f"\nIMPLEMENTATION NOTES: {session.validation_results.implementation_notes}\n"
 
     return context

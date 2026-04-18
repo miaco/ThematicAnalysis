@@ -7,11 +7,12 @@ import json
 import os
 import re
 from datetime import datetime
-from collections import defaultdict
 
 import anthropic
 
-from models.schemas import Session, Code
+from models.schemas import Session, Code, InterRaterCandidate, BiasFlag
+from orchestration.pipeline_config import MODELS
+from skills.step2_coding_consistency import check_coding_consistency
 
 
 client = anthropic.Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY"))
@@ -41,13 +42,10 @@ def code_quotes(session: Session) -> Session:
     _log(session, f"Starting open coding for {len(session.quotes)} quotes...")
 
     # Build quotes summary for the prompt
+    participant_names = {p.id: p.name for p in session.participants}
     quotes_text = ""
     for i, q in enumerate(session.quotes):
-        p_name = "Unknown"
-        for p in session.participants:
-            if p.id == q.participant_id:
-                p_name = p.name
-                break
+        p_name = participant_names.get(q.participant_id, "Unknown")
         quotes_text += f"\nQuote {i+1} (ID: {q.id}, Participant: {p_name}, File: {q.transcript_file}):\n\"{q.text}\"\n"
 
     screener_info = ""
@@ -115,17 +113,13 @@ IMPORTANT: Return ONLY valid JSON, no markdown code blocks."""
 
     _log(session, "Calling Claude for open coding analysis...")
 
-    with client.messages.stream(
-        model="claude-opus-4-6",
+    response = client.messages.create(
+        model=MODELS["primary"],
         max_tokens=12000,
         thinking={"type": "adaptive"},
         messages=[{"role": "user", "content": prompt}],
-    ) as stream:
-        final_msg = stream.get_final_message()
-        full_text = ""
-        for block in final_msg.content:
-            if block.type == "text":
-                full_text += block.text
+    )
+    full_text = "".join(block.text for block in response.content if block.type == "text")
 
     # Parse the JSON response
     try:
@@ -134,7 +128,10 @@ IMPORTANT: Return ONLY valid JSON, no markdown code blocks."""
     except json.JSONDecodeError:
         match = re.search(r'\{.*\}', full_text, re.DOTALL)
         if match:
-            data = json.loads(match.group())
+            try:
+                data = json.loads(match.group())
+            except json.JSONDecodeError:
+                raise ValueError(f"Could not parse coding JSON: {full_text[:500]}")
         else:
             raise ValueError(f"Could not parse coding JSON: {full_text[:500]}")
 
@@ -151,6 +148,14 @@ IMPORTANT: Return ONLY valid JSON, no markdown code blocks."""
         codes.append(code)
 
     session.codes = codes
+
+    # Populate code labels back onto Quote objects for consistency checking
+    quote_by_id = {q.id: q for q in session.quotes}
+    for code in codes:
+        for qid in code.quote_ids:
+            if qid in quote_by_id:
+                quote_by_id[qid].codes.append(code.label)
+
     _log(session, f"Generated {len(codes)} codes across {len(set(c.group for c in codes if c.group))} groups")
 
     # Store validation results
@@ -158,65 +163,26 @@ IMPORTANT: Return ONLY valid JSON, no markdown code blocks."""
     bias_flags = data.get("bias_flags", [])
 
     if inter_rater:
-        session.validation_results["inter_rater_candidates"] = inter_rater
+        session.validation_results.inter_rater_candidates = [
+            InterRaterCandidate(**c) for c in inter_rater
+        ]
         _log(session, f"Flagged {len(inter_rater)} quotes as inter-rater reliability candidates for human review")
 
     if bias_flags:
-        session.validation_results["bias_flags"] = bias_flags
+        session.validation_results.bias_flags = [
+            BiasFlag(**b) for b in bias_flags
+        ]
         for bf in bias_flags:
             _log(session, f"Potential bias detected: {bf.get('concern', '')}")
 
-    session.validation_results["coding_summary"] = data.get("coding_summary", "")
+    session.validation_results.coding_summary = data.get("coding_summary", "")
 
     # Validate coding consistency: check for similar quotes with very different codes
     _log(session, "Validating coding consistency...")
-    consistency_issues = _check_coding_consistency(session)
+    consistency_issues = check_coding_consistency(session.quotes)
     if consistency_issues:
-        session.validation_results["consistency_issues"] = consistency_issues
+        session.validation_results.consistency_issues = consistency_issues
         _log(session, f"Found {len(consistency_issues)} potential coding consistency issues")
 
     _log(session, "Open coding complete.")
     return session
-
-
-def _check_coding_consistency(session: Session) -> list[dict]:
-    """
-    Check for similar quotes that received very different codes.
-    Simple heuristic: find quotes from the same transcript file with no code overlap.
-    """
-    issues = []
-    # Group quotes by file
-    by_file: dict[str, list] = defaultdict(list)
-    for q in session.quotes:
-        by_file[q.transcript_file].append(q)
-
-    # For each pair of quotes in the same file, check if codes overlap
-    for filename, quotes in by_file.items():
-        for i in range(len(quotes)):
-            for j in range(i + 1, len(quotes)):
-                q1, q2 = quotes[i], quotes[j]
-                # Only check if quotes share some common words (simple similarity)
-                words1 = set(q1.text.lower().split())
-                words2 = set(q2.text.lower().split())
-                # Jaccard similarity
-                if len(words1) == 0 or len(words2) == 0:
-                    continue
-                intersection = words1 & words2
-                union = words1 | words2
-                similarity = len(intersection) / len(union)
-
-                if similarity > 0.4:
-                    # Check code overlap
-                    codes1 = set(q1.codes)
-                    codes2 = set(q2.codes)
-                    if codes1 and codes2 and not codes1.intersection(codes2):
-                        issues.append({
-                            "quote1_id": q1.id,
-                            "quote2_id": q2.id,
-                            "similarity_score": round(similarity, 2),
-                            "codes1": list(codes1),
-                            "codes2": list(codes2),
-                            "note": "Similar quotes have no overlapping codes — consider reviewing for consistency",
-                        })
-
-    return issues[:10]  # Return top 10 issues

@@ -85,12 +85,88 @@ class Recommendation(BaseModel):
     selected: bool = False
 
 
+# ---------------------------------------------------------------------------
+# Typed validation results
+# ---------------------------------------------------------------------------
+
+class InterRaterCandidate(BaseModel):
+    quote_id: str = ""
+    quote_text: str = ""
+    reason: str = ""
+    alternative_codes: list[str] = Field(default_factory=list)
+
+
+class BiasFlag(BaseModel):
+    concern: str = ""
+    affected_codes: list[str] = Field(default_factory=list)
+
+
+class CodingConsistencyIssue(BaseModel):
+    quote1_id: str = ""
+    quote2_id: str = ""
+    similarity_score: float = 0.0
+    codes1: list[str] = Field(default_factory=list)
+    codes2: list[str] = Field(default_factory=list)
+    note: str = ""
+
+
+class EvaluationSummary(BaseModel):
+    scored: int = 0
+    total: int = 0
+    average_score: float = 0.0
+
+
+class ValidationResults(BaseModel):
+    """Typed validation results accumulated across pipeline stages."""
+    # Transcript analysis
+    preprocessing_warnings: list[str] = Field(default_factory=list)
+    accuracy_issues: list[str] = Field(default_factory=list)
+    screener_coverage_warnings: list[str] = Field(default_factory=list)
+    # Coding
+    inter_rater_candidates: list[InterRaterCandidate] = Field(default_factory=list)
+    bias_flags: list[BiasFlag] = Field(default_factory=list)
+    coding_summary: str = ""
+    consistency_issues: list[CodingConsistencyIssue] = Field(default_factory=list)
+    # Evaluation
+    code_evaluation: Optional[EvaluationSummary] = None
+    theme_evaluation: Optional[EvaluationSummary] = None
+    # Theme generation
+    thin_description_themes: list[str] = Field(default_factory=list)
+    grounding_issues: list[str] = Field(default_factory=list)
+    thematic_map_notes: str = ""
+    data_saturation_assessment: str = ""
+    # Recommendations
+    implementation_notes: str = ""
+    # Report
+    pre_write_checks: list[str] = Field(default_factory=list)
+    research_alignment_warnings: str = ""
+
+
+class ResearchBrief(BaseModel):
+    """Structured research brief with distinct sections."""
+    research_question: str = ""
+    participants: str = ""
+    method: str = ""
+
+    def compose(self) -> str:
+        """Compose the structured fields into a single research brief string."""
+        parts = []
+        if self.research_question.strip():
+            parts.append(f"Research Question: {self.research_question.strip()}")
+        if self.participants.strip():
+            parts.append(f"Participants: {self.participants.strip()}")
+        if self.method.strip():
+            parts.append(f"Method: {self.method.strip()}")
+        return "\n\n".join(parts)
+
+
 class Session(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     state: PipelineState = PipelineState.IDLE
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: datetime = Field(default_factory=datetime.utcnow)
     research_brief: str = ""
+    research_brief_structured: ResearchBrief = Field(default_factory=ResearchBrief)
     transcript_source_url: Optional[str] = None
     transcripts: dict[str, str] = Field(default_factory=dict)
     participants: list[Participant] = Field(default_factory=list)
@@ -105,14 +181,16 @@ class Session(BaseModel):
     recommendations: list[Recommendation] = Field(default_factory=list)
     report: Optional[str] = None
     progress_log: list[dict] = Field(default_factory=list)
-    validation_results: dict = Field(default_factory=dict)
+    validation_results: ValidationResults = Field(default_factory=ValidationResults)
     error: Optional[str] = None
 
 
 # Request/response models for API
 
 class CreateSessionRequest(BaseModel):
-    research_brief: str
+    research_question: str
+    participants: str = ""
+    method: str = ""
     transcript_source_url: Optional[str] = None
 
 

@@ -11,7 +11,9 @@ from datetime import datetime
 
 import anthropic
 
-from models.schemas import Session, EvaluationScores
+from models.schemas import Session, EvaluationScores, EvaluationSummary
+from orchestration.pipeline_config import MODELS
+from skills.step3_5_scoring import parse_scores_array, compute_set_average
 
 
 client = anthropic.Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY"))
@@ -23,14 +25,6 @@ def _log(session: Session, message: str):
         "stage": "evaluation",
         "message": message,
     })
-
-
-def _parse_scores_array(text: str) -> list[dict]:
-    """Extract a JSON array of score objects from LLM output."""
-    match = re.search(r'\[.*\]', text, re.DOTALL)
-    if match:
-        return json.loads(match.group())
-    return []
 
 
 def evaluate_codes(session: Session) -> Session:
@@ -73,13 +67,13 @@ Return a JSON array with one object per code:
 Return ONLY the JSON array, no other text."""
 
     response = client.messages.create(
-        model="claude-sonnet-4-20250514",
+        model=MODELS["evaluation"],
         max_tokens=4096,
         messages=[{"role": "user", "content": prompt}],
     )
 
     try:
-        scores_list = _parse_scores_array(response.content[0].text)
+        scores_list = parse_scores_array(response.content[0].text)
         scores_by_id = {s["id"]: s for s in scores_list}
 
         scored_count = 0
@@ -94,14 +88,14 @@ Return ONLY the JSON array, no other text."""
                 )
                 scored_count += 1
 
-        avg = _compute_set_average(session.codes)
+        avg = compute_set_average(session.codes)
         _log(session, f"Scored {scored_count}/{len(session.codes)} codes. Average quality: {avg}/5.0")
 
-        session.validation_results["code_evaluation"] = {
-            "scored": scored_count,
-            "total": len(session.codes),
-            "average_score": avg,
-        }
+        session.validation_results.code_evaluation = EvaluationSummary(
+            scored=scored_count,
+            total=len(session.codes),
+            average_score=avg,
+        )
 
     except Exception as e:
         _log(session, f"Code evaluation parsing failed: {e}")
@@ -149,13 +143,13 @@ Return a JSON array with one object per theme:
 Return ONLY the JSON array, no other text."""
 
     response = client.messages.create(
-        model="claude-sonnet-4-20250514",
+        model=MODELS["evaluation"],
         max_tokens=4096,
         messages=[{"role": "user", "content": prompt}],
     )
 
     try:
-        scores_list = _parse_scores_array(response.content[0].text)
+        scores_list = parse_scores_array(response.content[0].text)
         scores_by_id = {s["id"]: s for s in scores_list}
 
         scored_count = 0
@@ -170,25 +164,16 @@ Return ONLY the JSON array, no other text."""
                 )
                 scored_count += 1
 
-        avg = _compute_set_average(session.themes)
+        avg = compute_set_average(session.themes)
         _log(session, f"Scored {scored_count}/{len(session.themes)} themes. Average quality: {avg}/5.0")
 
-        session.validation_results["theme_evaluation"] = {
-            "scored": scored_count,
-            "total": len(session.themes),
-            "average_score": avg,
-        }
+        session.validation_results.theme_evaluation = EvaluationSummary(
+            scored=scored_count,
+            total=len(session.themes),
+            average_score=avg,
+        )
 
     except Exception as e:
         _log(session, f"Theme evaluation parsing failed: {e}")
 
     return session
-
-
-def _compute_set_average(items) -> float:
-    """Compute average score across all scored items."""
-    scored = [item for item in items if item.scores is not None]
-    if not scored:
-        return 0.0
-    total = sum(item.scores.average for item in scored)
-    return round(total / len(scored), 2)

@@ -12,7 +12,11 @@ from datetime import datetime
 from typing import AsyncGenerator
 from urllib.parse import urlparse
 
+from dotenv import load_dotenv
+load_dotenv(os.path.join(os.path.dirname(__file__), "..", ".env"))
+
 import httpx
+import docx
 import pdfplumber
 from fastapi import FastAPI, HTTPException, BackgroundTasks, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
@@ -24,6 +28,7 @@ sys.path.insert(0, os.path.dirname(__file__))
 from models.schemas import (
     Session,
     PipelineState,
+    ResearchBrief,
     CreateSessionRequest,
     SetScreenerRequest,
     CodeReviewRequest,
@@ -31,7 +36,7 @@ from models.schemas import (
     RecommendationSelectRequest,
 )
 from storage.session_store import save_session, load_session, list_sessions, delete_session
-from agents.orchestrator import run_pipeline, get_progress_queue
+from orchestration import run_pipeline, get_progress_queue
 
 
 app = FastAPI(title="Thematic Analysis Agent", version="1.0.0")
@@ -51,9 +56,15 @@ app.add_middleware(
 
 @app.post("/api/sessions", response_model=Session)
 async def create_session(req: CreateSessionRequest):
-    """Create a new analysis session with a research brief."""
+    """Create a new analysis session with a structured research brief."""
+    brief_structured = ResearchBrief(
+        research_question=req.research_question,
+        participants=req.participants,
+        method=req.method,
+    )
     session = Session(
-        research_brief=req.research_brief,
+        research_brief=brief_structured.compose(),
+        research_brief_structured=brief_structured,
         transcript_source_url=req.transcript_source_url,
     )
     save_session(session)
@@ -90,7 +101,7 @@ async def remove_session(session_id: str):
 # ---------------------------------------------------------------------------
 
 MAX_FILE_SIZE = 10 * 1024 * 1024  # 10 MB per file
-ALLOWED_EXTENSIONS = {".txt", ".pdf"}
+ALLOWED_EXTENSIONS = {".txt", ".pdf", ".docx"}
 
 
 def _extract_text(filename: str, content_bytes: bytes) -> str:
@@ -100,6 +111,12 @@ def _extract_text(filename: str, content_bytes: bytes) -> str:
         with pdfplumber.open(io.BytesIO(content_bytes)) as pdf:
             pages = [page.extract_text() or "" for page in pdf.pages]
         text = "\n\n".join(pages).strip()
+        if not text:
+            raise ValueError(f"No extractable text found in {filename}")
+        return text
+    if ext == ".docx":
+        doc = docx.Document(io.BytesIO(content_bytes))
+        text = "\n\n".join(p.text for p in doc.paragraphs).strip()
         if not text:
             raise ValueError(f"No extractable text found in {filename}")
         return text
@@ -124,7 +141,7 @@ async def upload_transcripts(session_id: str, files: list[UploadFile] = File(...
     for upload in files:
         ext = os.path.splitext(upload.filename)[1].lower()
         if ext not in ALLOWED_EXTENSIONS:
-            errors.append(f"{upload.filename}: unsupported file type '{ext}'. Use .txt or .pdf.")
+            errors.append(f"{upload.filename}: unsupported file type '{ext}'. Use .txt, .pdf, or .docx.")
             continue
 
         content_bytes = await upload.read()
