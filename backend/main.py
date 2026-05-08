@@ -36,7 +36,8 @@ from models.schemas import (
     RecommendationSelectRequest,
 )
 from storage.session_store import save_session, load_session, list_sessions, delete_session
-from orchestration import run_pipeline, get_progress_queue
+from orchestration.orchestrator import run_pipeline
+from orchestration.state_machine import get_progress_queue
 
 
 app = FastAPI(title="Thematic Analysis Agent", version="1.0.0")
